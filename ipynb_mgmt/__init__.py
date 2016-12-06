@@ -6,6 +6,7 @@ from nbconvert import HTMLExporter
 import codecs
 import nbformat
 import copy
+import json
 
 
 class Template(object):
@@ -27,7 +28,7 @@ class Template(object):
 			for key,value in cfg.iteritems():
 				for w in nb_json['worksheets']:
 					for c in w['cells']:
-						c['input'] = c['input'].replace('TEMPLATE_'+key,str(value))
+						c['input'] = c['input'].replace('TEMPLATE_'+key,json.dumps(value,indent=2))
 			nb_path = self.path[:-15] + '_' + cfg['name'] + '.ipynb' # tmp path has to end in _template.ipynb
 			write(nb_json, open(nb_path, 'w'), 'json')
 			self.nb_list.append(Notebook(path=nb_path,json=nb_json))
