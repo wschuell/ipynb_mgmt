@@ -15,12 +15,14 @@ import os
 from path import Path
 #read = reads_json
 #write =  writes_json
+import copy
 
-
+import cProfile, pstats, StringIO
 
 class Template(object):
-	def __init__(self, path, config_file='config'):
+	def __init__(self, path, config_file='config', profiling=False):
 		self.path = path
+		self.profiling = profiling
 		self.config_file = config_file
 		self.dirpath = os.path.dirname(path)
 		self.name = os.path.basename(path)
@@ -35,7 +37,10 @@ class Template(object):
 
 	def get_configs(self):
 		template_module = __import__(self.name)
-		self.configs = template_module.get_nb_configs(config_file=self.config_file)
+		#try:
+		self.configs = template_module.TemplateObjects.get_nb_configs(config_file=self.config_file)
+		#except AttributeError:
+		#	raise AttributeError('class TemplateObjects is absent')
 
 	def generate(self):
 		if self.configs and not os.path.isdir(os.path.join(self.dirpath,'notebooks')):
@@ -47,15 +52,15 @@ class Template(object):
 			#example_cell = copy.deepcopy(nb_json['cells'][0])
 			#nb_json['cells'] = [example_cell.update(**self.first_cell(version=4))] + nb_json['cells']
 			for w in nb_json['worksheets']:
-				for key,value in cfg.iteritems():
-					for c in w['cells']:
-						c['input'] = c['input'].replace('TEMPLATE_'+str(key),json.dumps(value,indent=2))
 				example_cell = copy.deepcopy(w['cells'][0])
 				example_cell.update(**self.first_cell(version=3))
 				w['cells'] = [example_cell] + w['cells']
+				for key,value in cfg.iteritems():
+					for c in w['cells']:
+						c['input'] = c['input'].replace('TEMPLATE_'+str(key),json.dumps(value,indent=2))
 			nb_path = os.path.join(self.dirpath,'notebooks',self.short_name + '_' + cfg['name'] + '.ipynb')
 			nbformat.write(nb_json, nb_path, 3)#, 'json')
-			self.nb_list.append(Notebook(path=nb_path,json=nb_json))
+			self.nb_list.append(Notebook(path=nb_path,json=nb_json,profiling=self.profiling))
 
 	def run(self,n=None):
 		if n is None:
@@ -72,7 +77,15 @@ class Template(object):
 		self.run()
 
 	def first_cell(self,version=3):
-		text = 'import os\nos.chdir(\'..\')\nfrom ' + self.name + ' import TemplateObjects\n\n\ntemplate_obj = TemplateObjects(config_file=\'' +self.config_file + '\')'
+		text = """import os
+import sys
+os.chdir(\'..\')
+if not os.path.exists({work_dir}):
+	os.makedirs({work_dir})
+from {name} import TemplateObjects
+template_obj = TemplateObjects(config_file={config_file},name=TEMPLATE_name)
+os.chdir({work_dir})""".format(work_dir="\'work_dir\'",name=self.name,config_file=self.config_file)
+
 		if int(version) == 3:
 			return {u'cell_type': u'code',
 				'collapsed': False,
@@ -99,8 +112,9 @@ class Template(object):
 
 
 class Notebook(object):
-	def __init__(self,path,json=None,save_formats=['html']):
+	def __init__(self,path,json=None,save_formats=['html'],profiling=False):
 		self.path = path
+		self.profiling = profiling
 		self.dirpath = os.path.dirname(os.path.dirname(self.path))
 		self.name = os.path.basename(self.path)[:-6]
 		if json is not None:
@@ -111,7 +125,9 @@ class Notebook(object):
 
 	def run(self):
 		runner = NotebookRunner(self.nb_json,working_dir=os.path.dirname(self.path))
+		#self.start_profiler()
 		runner.run_notebook()
+		#self.stop_profiler()
 		self.nb_json = runner.nb
 
 	def save(self):
@@ -126,11 +142,100 @@ class Notebook(object):
 			output, resources = exporter.from_notebook_node(output_notebook)
 			html_path = os.path.join(self.dirpath,'html',self.name+'.html')
 			codecs.open(html_path, 'w', encoding='utf-8').write(output)
+#		self.save_profile(filename=os.path.join(self.dirpath,'nb_profiles',self.name+'_profile.txt'))
+
+	def headcell_profiling(self):
+		return """import cProfile, pstats, StringIO
+profiler = cProfile.Profile()
+profiler.enable()"""
+
+	def tailcell_profiling(self):
+		return """profiler.disable()
+
+s = StringIO.StringIO()
+sortby = 'cumulative'
+ps = pstats.Stats(profiler, stream=s).sort_stats(sortby)
+ps.print_stats()
+filename='profile2.txt'
+with open(filename,'w') as f:
+    f.write(s.getvalue())
+s.close()"""
+
+
+#	def start_profiler(self):
+#		if self.profiling:
+#			self.profiler = cProfile.Profile()
+#			self.profiler.enable()
+#
+#	def stop_profiler(self):
+#		if self.profiling and hasattr(self,'profiler'):
+#			self.profiler.disable()
+#
+#	def save_profile(self,filename):
+#		if self.profiling and hasattr(self,'profiler'):
+#			s = StringIO.StringIO()
+#			sortby = 'cumulative'
+#			ps = pstats.Stats(self.profiler, stream=s).sort_stats(sortby)
+#			ps.print_stats()
+#			if not os.path.isdir(os.path.dirname(filename)):
+#				os.makedirs(os.path.dirname(filename))
+#			with open(filename,'w') as f:
+#				f.write(s.getvalue())
+#			s.close()
 
 
 
 
 
-def execute_folder(folder, config_file='config'):
-	tmp = Template(folder,config_file=config_file)
+def execute_folder(folder, config_file='config', profiling=True):
+	tmp = Template(folder,config_file=config_file, profiling=profiling)
 	tmp.do_all()
+
+
+
+
+def cached(tempfun):
+	def mod_fun(obj_self, *args, **kwargs):
+		args_list = sorted([str(val) for val in list(args) + kwargs.values()])
+		args_str = ''.join(args_list)
+		try:
+			return copy.deepcopy(obj_self._cache[tempfun.__name__+args_str])
+		except KeyError:
+			obj_self._cache[tempfun.__name__+args_str] = tempfun(obj_self, *args, **kwargs)
+			return copy.deepcopy(obj_self._cache[tempfun.__name__+args_str])
+	return mod_fun
+
+
+
+class TemplateObjects(object):
+
+	@classmethod
+	def get_names_from_file(cls,config_file='config'):
+		config = cls.configs.load(config_file)
+		return config.names
+
+
+	def __init__(self,config_file='config',name=''):
+		self.name = name
+		cls = self.__class__
+		config = cls.configs.load(config_file)
+		for v in cls.variables:
+			try:
+				val = getattr(config,v)
+			except:
+				print config.__getattr__(v)
+				raise
+			setattr(self,v,val)
+		self._cache = {}
+
+	def nb_cfg(self,n=None):
+		if n is None:
+			n = self.name
+		dict_cfg = {'name':n}
+		return dict_cfg
+
+
+	@classmethod
+	def get_nb_configs(cls,config_file='config'):
+		names = cls.get_names_from_file(config_file=config_file)
+		return [cls(config_file=config_file,name=n).nb_cfg() for n in names]
