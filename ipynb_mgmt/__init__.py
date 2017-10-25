@@ -19,7 +19,11 @@ import copy
 from importlib import import_module
 
 
-import cProfile, pstats, StringIO
+import cProfile, pstats
+try:
+	import StringIO as io
+except:
+	import io
 
 class Template(object):
 	def __init__(self, path, config_file='config', profiling=False):
@@ -57,7 +61,7 @@ class Template(object):
 				example_cell = copy.deepcopy(w['cells'][0])
 				example_cell.update(**self.first_cell(version=3))
 				w['cells'] = [example_cell] + w['cells']
-				for key,value in cfg.iteritems():
+				for key,value in list(cfg.items()):
 					for c in w['cells']:
 						c['input'] = c['input'].replace('TEMPLATE_'+str(key),json.dumps(value,indent=2))
 			nb_path = os.path.join(self.dirpath,'notebooks',self.short_name + '_' + cfg['name'] + '.ipynb')
@@ -89,22 +93,22 @@ template_obj = TemplateObjects(config_file={config_file},name=TEMPLATE_name)
 os.chdir({work_dir})""".format(work_dir="\'work_dir\'",name=self.name,config_file=self.config_file)
 
 		if int(version) == 3:
-			return {u'cell_type': u'code',
+			return {'cell_type': 'code',
 				'collapsed': False,
 				'input': text,
 				#'language': 'python',
 				#u'metadata': {},
-				u'outputs': [],
+				'outputs': [],
 				#'prompt_number': None
 				}
 		elif int(version) == 4:
-			return {u'cell_type': u'code',
+			return {'cell_type': 'code',
 				#'collapsed': False,
 				#'input': text,
 				'source':text,
 				#'language': 'python',
 				#u'metadata': {},
-				u'outputs': [],
+				'outputs': [],
 				'execution_count': None
 				}
 		else:
@@ -202,7 +206,7 @@ def execute_folder(folder, config_file='config', profiling=True):
 
 def cached(tempfun):
 	def mod_fun(obj_self, *args, **kwargs):
-		args_list = sorted([str(val) for val in list(args) + kwargs.values()])
+		args_list = sorted([str(val) for val in list(args) + list(kwargs.values())])
 		args_str = ''.join(args_list)
 		try:
 			return copy.deepcopy(obj_self._cache[tempfun.__name__+args_str])
