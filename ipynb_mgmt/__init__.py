@@ -16,6 +16,8 @@ from path import Path
 #read = reads_json
 #write =  writes_json
 import copy
+from importlib import import_module
+
 
 import cProfile, pstats, StringIO
 
@@ -126,7 +128,11 @@ class Notebook(object):
 	def run(self):
 		runner = NotebookRunner(self.nb_json,working_dir=os.path.dirname(self.path))
 		#self.start_profiler()
-		runner.run_notebook()
+		try:
+			runner.run_notebook()
+		except:
+			runner.km.shutdown_kernel(now=True)
+			raise
 		#self.stop_profiler()
 		self.nb_json = runner.nb
 
@@ -223,6 +229,7 @@ class TemplateObjects(object):
 			try:
 				val = getattr(config,v)
 			except:
+				print v
 				print config.__getattr__(v)
 				raise
 			setattr(self,v,val)
@@ -239,3 +246,26 @@ class TemplateObjects(object):
 	def get_nb_configs(cls,config_file='config'):
 		names = cls.get_names_from_file(config_file=config_file)
 		return [cls(config_file=config_file,name=n).nb_cfg() for n in names]
+
+class ConfigLoader(object):
+	def load(self,filename):
+		if isinstance(filename,list):
+			conf_list = []
+			for name in filename:
+				conf_list.append(import_module('.'+name,package=__name__).Config())
+			main_conf = conf_list[0]
+			for m in range(1,len(conf_list)):
+				c = conf_list[m]
+				for att in dir(c):
+					if att[0] != '_':
+						setattr(main_conf,att,getattr(c,att))
+
+			#def new_get_attr(attribute):
+			#	for m in range(1,len(conf_list)):
+			#		c = conf_list[m]
+			#		if hasattr(c,attribute):
+			#			return getattr(c,attribute)
+			#main_conf.__getattr__ = new_get_attr
+			return main_conf
+		else:
+			return import_module('.'+filename,package=__name__).Config()
