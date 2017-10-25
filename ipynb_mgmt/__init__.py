@@ -229,8 +229,8 @@ class TemplateObjects(object):
 			try:
 				val = getattr(config,v)
 			except:
-				print v
-				print config.__getattr__(v)
+				print(v)
+				print(config.__getattr__(v))
 				raise
 			setattr(self,v,val)
 		self._cache = {}
